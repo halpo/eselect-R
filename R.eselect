@@ -1,0 +1,148 @@
+# Copyright 2016 Andrew Redd
+# Distributed under the terms of the GNU General Public License v2
+
+DESCRIPTION="Manage dev-lang/R symlinks"
+MAINTAINER="amredd+gentoo@gmail.com"
+VERSION="20160201"
+
+bindir=${EROOT}/usr/bin
+man1dir=${EROOT}/usr/share/man/man1
+infodir=${EROOT}/usr/share/info
+
+
+find_targets() {
+	for t in ${EROOT}${bindir}/${1:-R}-* ; do
+		[[ -e $t ]] || continue
+		echo ${t}
+	done
+}
+
+
+### set action ###
+
+do_list() {
+	write_list_start "Available R profiles:"
+	local targets=( $(find_targets) )
+	local i line
+
+	for (( i = 0; i < ${#targets[@]}; i++ )) ; do
+		line=$(basename "${targets[i]}")
+
+		# find out the current version
+		if [[ ${targets[i]} = $(canonicalise "${EROOT}${bindir}/R") ]] ; then
+			targets[i]=$(highlight_marker "${line}")
+		else
+			targets[i]=${line}
+		fi
+	done
+	write_numbered_list -m "(none found)" "${targets[@]}"
+}
+
+describe_list(){
+	echo "List available R interpreters."
+}
+
+
+### set action ###
+
+remove_symlinks(){
+	rm "${EROOT}${bindir}/"{R,Rscript}
+	rm "${EROOT}/usr/include/Rmath.h"
+	rm "${EROOT}${mandir}/"{R.1.bz2,Rscript.1.bz2}
+	for f in  "R-"{admin,data,exts,FAQ,intro,ints,lang}; do
+		if [ -e "${EROOT}${infodir}/"${f}.info.gz ] ; then
+			install-info --infodir="${infodir}" --remove "${f}"
+			rm -f "${EROOT}${infodir}"/${f}.info.gz || echo "Info file \"$f\" could not be removed from \"${infodir}\"".
+		fi
+	done
+	rm -f "${EROOT}${infodir}"/R-exts.info-{1,2}.gz || echo "Info file R-exts could not be removed from \"${infodir}\"".
+}
+set_symlinks(){
+	local target=$1
+	
+	if is_number ${target}; then
+		local targets=( $(find_targets) )
+		target=${tagerts[target-1]}
+	fi
+	
+	[[ -z ${target} || ! `expr match "${target}" "^R"` || ! -d ${EROOT}/usr/local/${target} ]] \
+		&& die -q "Target \"$1\" doesn't appear to be valid."
+	
+	
+	ln -s "${EROOT}/usr/local/${target}/bin/R" "${EROOT}/usr/bin/R"
+	ln -s "${EROOT}/usr/local/${target}/bin/Rscript" "${EROOT}/usr/bin/Rscript"
+	ln -s "${EROOT}/usr/local/${target}/include/Rmath.h" "${EROOT}/usr/include/Rmath.h"
+	ln -s "${EROOT}/usr/local/${target}/man/man1/R.1.bz2" "${EROOT}${mandir}/R.1.bz2"
+	ln -s "${EROOT}/usr/local/${target}/man/man1/Rscript.1.bz2" "${EROOT}${mandir}/Rscript.1.bz2"
+	for f in  ${EROOT}/usr/local/${target}/info/R-* ; do
+		ln -s ${f} "${infodir}/$(basename ${f})"
+		install-info --infodir="${infodir}" "${infodir}/$(basename ${f})" 
+	done
+}
+do_set(){
+	[[ -z $1 ]] && die -q "You didn't tell me what to set the symlink to"
+    [[ $# -gt 1 ]] && die -q "Too many parameters"
+	
+	if [[ -L ${EROOT}/usr/bin/R ]]; then
+        # existing symlink
+        remove_symlinks || die -q "Couldn't remove existing symlink"
+        set_symlinks "$1" || die -q "Couldn't set a new symlink"
+    else
+        set_symlinks "$1" || die -q "Couldn't set a new symlink"
+    fi
+}
+describe_set_parameters() {
+    echo "<target>"
+}
+describe_set_options() {
+    echo "target : Target name or number (from 'list' action)"
+}
+describe_set() {
+    echo "Set R interpreter version."
+}
+
+### show action ###
+
+describe_show(){
+	echo "Show the current R interpreter."
+}
+
+do_show(){
+    write_list_start "Current R symlink:"
+    if [[ -L ${EROOT}/usr/bin/R ]]; then
+        local R=$(canonicalise "${EROOT}/usr/bin/R")
+        write_kv_list_entry "${R%/}" ""
+    else
+        write_kv_list_entry "(unset)" ""
+    fi
+}
+
+
+### cleanup action ###
+describe_cleanup() {
+	echo "This action is not to be called manually."
+}
+
+do_cleanup() {
+	[[ -z ${@} ]] || die -q "This function does not expect any arguments"
+
+	# Do we need to clean up?
+	if [[ -e "${EROOT}${bindir}"/$(readlink "${EROOT}${bindir}/R") ]]; then
+		echo "Nothing to clean up."
+		return
+	fi
+
+	local targets=( $(find_targets) )
+
+	remove_symlinks || \
+		die -q "Could not remove symlinks"
+
+	if [[ ${#targets[@]} -ne 0 ]] ; then
+		echo "Marking the latest still installed version as default..."
+		create_symlinks $(basename ${targets[@]: -1})
+	else
+		echo "No R profiles left on the system. Stale symlinks removed."
+	fi
+}
+
+
